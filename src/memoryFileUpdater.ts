@@ -209,7 +209,8 @@ export class MemoryFileUpdater {
             this.outputChannel.appendLine(`[${new Date().toISOString()}] Query preview: ${payload.query.substring(0, 100)}...`);
             this.outputChannel.appendLine(`[${new Date().toISOString()}] Response preview: ${payload.response.substring(0, 100)}...`);
             
-            const result = await this.client.recordCodeArtifact(payload);
+            // ✅ FIX: Pass workspaceFolder to ensure logs appear in correct project's output channel
+            const result = await this.client.recordCodeArtifact(payload, workspaceFolder);
             
             const logMsg3 = `[Memory File Updater] 📥 recordCodeArtifact result received: result=${result ? 'not null' : 'null'}, success=${result?.success}, stored_artifacts=${result?.stored_artifacts}, memories_created=${result?.memories_created}`;
             console.log(logMsg3);
@@ -287,7 +288,8 @@ export class MemoryFileUpdater {
                 metadata: metadata || {}
             };
 
-            const result = await this.client.recordCodeArtifact(payload);
+            // ✅ FIX: Pass workspaceFolder to ensure logs appear in correct project's output channel
+            const result = await this.client.recordCodeArtifact(payload, workspaceFolder);
             
             if (result && result.success) {
                 console.log('[Memory File Updater] Code artifact recorded successfully:', {

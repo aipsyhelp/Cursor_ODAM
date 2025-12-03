@@ -451,7 +451,8 @@ export class CodeArtifactTracker {
                 metadata: enhancedMetadata
             };
 
-            const result = await this.client.recordCodeArtifact(payload);
+            // ✅ FIX: Pass workspaceFolder to ensure logs appear in correct project's output channel
+            const result = await this.client.recordCodeArtifact(payload, workspaceFolder);
             
             if (result && result.success) {
                 console.log(`[Code Artifact Tracker] Recorded ${result.stored_artifacts} artifacts, created ${result.memories_created} memories`);

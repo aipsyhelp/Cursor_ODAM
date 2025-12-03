@@ -60,7 +60,7 @@ export class ProjectKnowledgeIndexer {
 
                 for (const section of sections) {
                     try {
-                        await this.recordSection(sessionId, file.relativePath, section);
+                        await this.recordSection(sessionId, file.relativePath, section, workspaceFolder);
                         // Increased delay to avoid overwhelming the API and prevent timeouts
                         await this.sleep(600);
                     } catch (error) {
@@ -130,7 +130,7 @@ export class ProjectKnowledgeIndexer {
         return sections;
     }
 
-    private async recordSection(sessionId: string, relativePath: string, section: DocSection): Promise<void> {
+    private async recordSection(sessionId: string, relativePath: string, section: DocSection, workspaceFolder: vscode.WorkspaceFolder): Promise<void> {
         try {
             const summary = this.createSummary(section);
             const chunk = this.truncate(`${section.body}`.replace(/\s+/g, ' ').trim(), 1600);
@@ -165,7 +165,8 @@ export class ProjectKnowledgeIndexer {
                 }
             };
 
-            const result = await this.client.recordCodeArtifact(payload);
+            // ✅ FIX: Pass workspaceFolder to ensure logs appear in correct project's output channel
+            const result = await this.client.recordCodeArtifact(payload, workspaceFolder);
             if (result?.success) {
                 this.log(`Indexed section "${section.title}" from ${relativePath} (entities=${result.memories_created})`);
                 if (this.logger) {

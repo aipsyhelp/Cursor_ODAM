@@ -39,10 +39,14 @@ export class MemoryStatusBar {
 
     /**
      * Update tooltip with memory statistics
+     * ✅ FIX: Display project-specific statistics from ODAM API
      */
     updateTooltip(stats: MemoryStats | null): void {
         if (stats) {
-            this.statusBarItem.tooltip = `ODAM Memory: Total memories: ${stats.total_memories}\n` +
+            // ✅ FIX: Format tooltip to match the expected display format
+            // This shows project-specific statistics retrieved from ODAM API
+            this.statusBarItem.tooltip = `ODAM Memory (project):\n` +
+                `Total memories: ${stats.total_memories}\n` +
                 `Entities: ${stats.entities_count}\n` +
                 `Graph nodes: ${stats.graph_nodes || 0}\n` +
                 `Memory health: ${(stats.memory_health_score * 100).toFixed(1)}%\n` +
