@@ -45,40 +45,63 @@ export class HookEventProcessor implements vscode.Disposable {
     private dependencies: HookEventProcessorDeps;
     private pendingByGeneration: Map<string, PendingInteraction> = new Map();
     private pendingByConversation: Map<string, PendingInteraction> = new Map();
-    private debugChannel: vscode.OutputChannel;
+    private debugChannels: Map<string, vscode.OutputChannel> = new Map();
 
     constructor(deps: HookEventProcessorDeps) {
         this.dependencies = deps;
         
-        // ✅ FIX: Create workspace-specific output channel to prevent log mixing between projects
+        // ✅ FIX: Output channels will be created dynamically based on current workspace during event processing
+        // This ensures logs appear in the correct project's output channel
         const workspaceFolder = deps.workspaceProvider();
-        const channelName = workspaceFolder 
-            ? `ODAM Hook Events (${require('path').basename(workspaceFolder.uri.fsPath)})`
-            : 'ODAM Hook Events';
-        this.debugChannel = vscode.window.createOutputChannel(channelName);
-        this.debugChannel.appendLine(`[${new Date().toISOString()}] HookEventProcessor initialized`);
+        if (workspaceFolder) {
+            const channel = this.getOutputChannel(workspaceFolder);
+            channel.appendLine(`[${new Date().toISOString()}] HookEventProcessor initialized for workspace: ${workspaceFolder.name}`);
+        }
+    }
+
+    /**
+     * Get or create workspace-specific output channel
+     * This ensures logs appear in the correct project's output channel
+     */
+    private getOutputChannel(workspaceFolder: vscode.WorkspaceFolder): vscode.OutputChannel {
+        const path = require('path');
+        const workspaceName = path.basename(workspaceFolder.uri.fsPath);
+        const channelName = `ODAM Hook Events (${workspaceName})`;
+        
+        // VS Code will return existing channel if it exists, or create new one
+        // This ensures we always use the correct channel for the current workspace
+        if (!this.debugChannels.has(channelName)) {
+            const channel = vscode.window.createOutputChannel(channelName);
+            this.debugChannels.set(channelName, channel);
+        }
+        
+        return this.debugChannels.get(channelName)!;
     }
 
     async handleBeforePrompt(payload: HookPromptPayload): Promise<void> {
-        // ✅ IMPORTANT: Log immediately to verify hook is being called
-        this.debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] 🔵 handleBeforePrompt called`);
-        console.log('[HookEventProcessor] handleBeforePrompt called', { 
-            conversationId: payload.conversation_id, 
-            generationId: payload.generation_id,
-            promptLength: payload.prompt?.length || 0
-        });
-
         const workspaceFolder = this.dependencies.workspaceProvider();
         if (!workspaceFolder) {
             const error = 'Workspace folder not available';
-            this.debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] ❌ ${error}`);
+            console.error(`[HookEventProcessor] ❌ ${error}`);
             throw new Error(error);
         }
 
+        // ✅ FIX: Get output channel for current workspace to ensure logs appear in correct project
+        const debugChannel = this.getOutputChannel(workspaceFolder);
+        
+        // ✅ IMPORTANT: Log immediately to verify hook is being called
+        debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] 🔵 handleBeforePrompt called for workspace: ${workspaceFolder.name}`);
+        console.log('[HookEventProcessor] handleBeforePrompt called', { 
+            conversationId: payload.conversation_id, 
+            generationId: payload.generation_id,
+            promptLength: payload.prompt?.length || 0,
+            workspaceName: workspaceFolder.name
+        });
+
         const userQuery = (payload.prompt || '').trim();
         if (!userQuery) {
-            this.log('before: skip empty prompt');
-            this.debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] ⚠️ Skipping empty prompt`);
+            this.log('before: skip empty prompt', undefined, workspaceFolder);
+            debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] ⚠️ Skipping empty prompt`);
             return;
         }
 
@@ -101,27 +124,31 @@ export class HookEventProcessor implements vscode.Disposable {
             conversationId: payload.conversation_id,
             generationId: payload.generation_id,
             length: userQuery.length
-        });
+        }, workspaceFolder);
 
         await this.dependencies.memoryFileUpdater.updateMemoryFile(userQuery, workspaceFolder);
-        this.log('before: updateMemoryFile completed');
+        this.log('before: updateMemoryFile completed', undefined, workspaceFolder);
     }
 
     async handleAfterResponse(payload: HookResponsePayload): Promise<void> {
-        // ✅ IMPORTANT: Log immediately to verify hook is being called
-        this.debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] 🟢 handleAfterResponse called`);
-        console.log('[HookEventProcessor] handleAfterResponse called', { 
-            conversationId: payload.conversation_id, 
-            generationId: payload.generation_id,
-            textLength: payload.text?.length || 0
-        });
-
         const workspaceFolder = this.dependencies.workspaceProvider();
         if (!workspaceFolder) {
             const error = 'Workspace folder not available';
-            this.debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] ❌ ${error}`);
+            console.error(`[HookEventProcessor] ❌ ${error}`);
             throw new Error(error);
         }
+
+        // ✅ FIX: Get output channel for current workspace to ensure logs appear in correct project
+        const debugChannel = this.getOutputChannel(workspaceFolder);
+        
+        // ✅ IMPORTANT: Log immediately to verify hook is being called
+        debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] 🟢 handleAfterResponse called for workspace: ${workspaceFolder.name}`);
+        console.log('[HookEventProcessor] handleAfterResponse called', { 
+            conversationId: payload.conversation_id, 
+            generationId: payload.generation_id,
+            textLength: payload.text?.length || 0,
+            workspaceName: workspaceFolder.name
+        });
 
         const interaction = this.lookupInteraction(payload);
         const assistantResponse = (payload.text || '').trim();
@@ -132,8 +159,8 @@ export class HookEventProcessor implements vscode.Disposable {
                 hasQuery: !!interaction?.query,
                 hasResponse: !!assistantResponse
             };
-            this.log('after: missing interaction or response', missingInfo);
-            this.debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] ⚠️ Missing data: ${JSON.stringify(missingInfo)}`);
+            this.log('after: missing interaction or response', missingInfo, workspaceFolder);
+            debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] ⚠️ Missing data: ${JSON.stringify(missingInfo)}`);
             return;
         }
 
@@ -142,7 +169,7 @@ export class HookEventProcessor implements vscode.Disposable {
             generationId: payload.generation_id,
             queryLength: interaction.query.length,
             responseLength: assistantResponse.length
-        });
+        }, workspaceFolder);
 
         try {
             this.log('after: calling updateMemoryAfterResponse', {
@@ -150,10 +177,10 @@ export class HookEventProcessor implements vscode.Disposable {
                 response: assistantResponse.substring(0, 50),
                 queryLength: interaction.query.length,
                 responseLength: assistantResponse.length
-            });
+            }, workspaceFolder);
             
             // ✅ IMPORTANT: Log before calling to ensure we see this in output
-            this.debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] About to call updateMemoryAfterResponse with query length=${interaction.query.length}, response length=${assistantResponse.length}`);
+            debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] About to call updateMemoryAfterResponse with query length=${interaction.query.length}, response length=${assistantResponse.length}`);
             
             await this.dependencies.memoryFileUpdater.updateMemoryAfterResponse(
                 interaction.query,
@@ -162,21 +189,18 @@ export class HookEventProcessor implements vscode.Disposable {
                 workspaceFolder
             );
             
-            this.log('after: updateMemoryAfterResponse completed');
-            this.debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] updateMemoryAfterResponse completed successfully`);
+            this.log('after: updateMemoryAfterResponse completed', undefined, workspaceFolder);
+            debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] updateMemoryAfterResponse completed successfully`);
             
             // ✅ FIX: Update status bar tooltip with project-specific statistics after saving
             if (this.dependencies.statusBar && this.dependencies.userId && this.dependencies.odamClient) {
                 try {
-                    const workspaceFolder = this.dependencies.workspaceProvider();
-                    if (workspaceFolder) {
-                        const sessionId = this.getSessionId(workspaceFolder.uri.fsPath);
-                        // ✅ FIX: Get project-specific stats (with session_id) instead of global stats
-                        const stats = await this.dependencies.odamClient.getMemoryStats(this.dependencies.userId, sessionId);
-                        if (stats) {
-                            this.dependencies.statusBar.updateTooltip(stats);
-                            this.debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] Status bar tooltip updated with project stats: memories=${stats.total_memories}, entities=${stats.entities_count}, session_id=${sessionId}`);
-                        }
+                    const sessionId = this.getSessionId(workspaceFolder.uri.fsPath);
+                    // ✅ FIX: Get project-specific stats (with session_id) instead of global stats
+                    const stats = await this.dependencies.odamClient.getMemoryStats(this.dependencies.userId, sessionId);
+                    if (stats) {
+                        this.dependencies.statusBar.updateTooltip(stats);
+                        debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] Status bar tooltip updated with project stats: memories=${stats.total_memories}, entities=${stats.entities_count}, session_id=${sessionId}`);
                     }
                 } catch (error) {
                     // Don't fail if tooltip update fails
@@ -186,23 +210,25 @@ export class HookEventProcessor implements vscode.Disposable {
             
             // Verify that data was saved by checking ODAM directly
             // This will help us understand if the save actually happened
-            this.log('after: verifying save - check ODAM API logs in output channels: "ODAM Memory File Updater" and "ODAM Client"');
-            this.debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] Check output channels "ODAM Memory File Updater" and "ODAM Client" for detailed logs`);
+            this.log('after: verifying save - check ODAM API logs in output channels: "ODAM Memory File Updater" and "ODAM Client"', undefined, workspaceFolder);
+            debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] Check output channels "ODAM Memory File Updater" and "ODAM Client" for detailed logs`);
         } catch (error: any) {
             const errorMsg = `after: ❌ ERROR saving to ODAM: ${error?.message || String(error)}`;
             this.log(errorMsg, {
                 error: error?.message || String(error),
                 stack: error?.stack?.substring(0, 200)
-            });
-            this.debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] ${errorMsg}`);
-            this.debugChannel.appendLine(`[${new Date().toISOString()}] Stack: ${error?.stack?.substring(0, 500)}`);
+            }, workspaceFolder);
+            debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] ${errorMsg}`);
+            debugChannel.appendLine(`[${new Date().toISOString()}] Stack: ${error?.stack?.substring(0, 500)}`);
             throw error;
         }
     }
 
     async handleAfterThought(payload: HookThoughtPayload): Promise<void> {
+        const workspaceFolder = this.dependencies.workspaceProvider();
+        
         if (!this.dependencies.logger) {
-            this.log('thought: logger not available, skipping');
+            this.log('thought: logger not available, skipping', undefined, workspaceFolder);
             return;
         }
 
@@ -211,7 +237,7 @@ export class HookEventProcessor implements vscode.Disposable {
             generationId: payload.generation_id,
             length: (payload.text || '').length,
             duration: payload.duration_ms
-        });
+        }, workspaceFolder);
 
         this.dependencies.logger.logCursorContext(
             payload.text || '',
@@ -225,12 +251,17 @@ export class HookEventProcessor implements vscode.Disposable {
     clear(): void {
         this.pendingByGeneration.clear();
         this.pendingByConversation.clear();
-        this.log('Cleared pending interactions');
+        const workspaceFolder = this.dependencies.workspaceProvider();
+        this.log('Cleared pending interactions', undefined, workspaceFolder);
     }
 
     dispose(): void {
-        this.debugChannel.appendLine(`[${new Date().toISOString()}] HookEventProcessor disposed`);
-        this.debugChannel.dispose();
+        // Log to all channels before disposing
+        for (const [name, channel] of this.debugChannels.entries()) {
+            channel.appendLine(`[${new Date().toISOString()}] HookEventProcessor disposed`);
+            channel.dispose();
+        }
+        this.debugChannels.clear();
     }
 
     /**
@@ -271,11 +302,22 @@ export class HookEventProcessor implements vscode.Disposable {
         return undefined;
     }
 
-    private log(message: string, data?: Record<string, unknown>): void {
+    private log(message: string, data?: Record<string, unknown>, workspaceFolder?: vscode.WorkspaceFolder): void {
         const entry = data ? `${message} ${JSON.stringify(data)}` : message;
         const line = `[HookEventProcessor] ${entry}`;
         console.log(line);
-        this.debugChannel.appendLine(`[${new Date().toISOString()}] ${entry}`);
+        
+        // ✅ FIX: Use workspace-specific output channel if available
+        if (workspaceFolder) {
+            const debugChannel = this.getOutputChannel(workspaceFolder);
+            debugChannel.appendLine(`[${new Date().toISOString()}] ${entry}`);
+        } else {
+            // Fallback: log to first available channel or console only
+            const firstChannel = Array.from(this.debugChannels.values())[0];
+            if (firstChannel) {
+                firstChannel.appendLine(`[${new Date().toISOString()}] ${entry}`);
+            }
+        }
     }
 }
 
