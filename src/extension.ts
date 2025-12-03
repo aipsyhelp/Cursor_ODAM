@@ -117,14 +117,15 @@ export async function activate(context: vscode.ExtensionContext) {
     // Subscribe to workspace events
     setupEventListeners(context, odamClient, userId, memoryFileUpdater, codeArtifactTracker, codeStyleTracker);
 
-    // Index project documentation to bootstrap ODAM memory
+    // Index project documentation to bootstrap ODAM memory (async, non-blocking)
+    // IMPORTANT: Run indexing in background to avoid blocking activation and hook events
     if (workspaceFolder) {
         projectIndexer = new ProjectKnowledgeIndexer(odamClient, userId, context.globalState, contextLogger || undefined);
-        try {
-            await projectIndexer.indexWorkspace(workspaceFolder);
-        } catch (error) {
+        // Run indexing asynchronously without blocking activation
+        projectIndexer.indexWorkspace(workspaceFolder).catch((error) => {
             console.warn('[Extension] Project documentation indexing failed:', error);
-        }
+            outputChannel.appendLine(`[${new Date().toISOString()}] ⚠️ Project indexing error: ${error instanceof Error ? error.message : String(error)}`);
+        });
     }
 
     // Start chat interceptors

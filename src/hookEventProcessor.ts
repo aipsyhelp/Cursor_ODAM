@@ -51,14 +51,25 @@ export class HookEventProcessor implements vscode.Disposable {
     }
 
     async handleBeforePrompt(payload: HookPromptPayload): Promise<void> {
+        // ✅ IMPORTANT: Log immediately to verify hook is being called
+        this.debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] 🔵 handleBeforePrompt called`);
+        console.log('[HookEventProcessor] handleBeforePrompt called', { 
+            conversationId: payload.conversation_id, 
+            generationId: payload.generation_id,
+            promptLength: payload.prompt?.length || 0
+        });
+
         const workspaceFolder = this.dependencies.workspaceProvider();
         if (!workspaceFolder) {
-            throw new Error('Workspace folder not available');
+            const error = 'Workspace folder not available';
+            this.debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] ❌ ${error}`);
+            throw new Error(error);
         }
 
         const userQuery = (payload.prompt || '').trim();
         if (!userQuery) {
             this.log('before: skip empty prompt');
+            this.debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] ⚠️ Skipping empty prompt`);
             return;
         }
 
@@ -88,16 +99,32 @@ export class HookEventProcessor implements vscode.Disposable {
     }
 
     async handleAfterResponse(payload: HookResponsePayload): Promise<void> {
+        // ✅ IMPORTANT: Log immediately to verify hook is being called
+        this.debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] 🟢 handleAfterResponse called`);
+        console.log('[HookEventProcessor] handleAfterResponse called', { 
+            conversationId: payload.conversation_id, 
+            generationId: payload.generation_id,
+            textLength: payload.text?.length || 0
+        });
+
         const workspaceFolder = this.dependencies.workspaceProvider();
         if (!workspaceFolder) {
-            throw new Error('Workspace folder not available');
+            const error = 'Workspace folder not available';
+            this.debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] ❌ ${error}`);
+            throw new Error(error);
         }
 
         const interaction = this.lookupInteraction(payload);
         const assistantResponse = (payload.text || '').trim();
 
         if (!interaction || !interaction.query || !assistantResponse) {
-            this.log('after: missing interaction or response');
+            const missingInfo = {
+                hasInteraction: !!interaction,
+                hasQuery: !!interaction?.query,
+                hasResponse: !!assistantResponse
+            };
+            this.log('after: missing interaction or response', missingInfo);
+            this.debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] ⚠️ Missing data: ${JSON.stringify(missingInfo)}`);
             return;
         }
 

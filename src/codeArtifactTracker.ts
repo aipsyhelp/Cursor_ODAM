@@ -213,6 +213,12 @@ export class CodeArtifactTracker {
                     outcome: executionAnalysis?.outcome || 'implemented'
                 };
 
+                // Generate chunk_id if not provided (for tracking code chunks)
+                if (!artifact.chunk_id && artifact.identifier && artifact.path) {
+                    const chunkIdSource = `${artifact.identifier}:${artifact.path}`;
+                    artifact.chunk_id = Buffer.from(chunkIdSource).toString('base64').substring(0, 32);
+                }
+
                 // Add test status when available
                 if (executionAnalysis?.test_status) {
                     artifact.test_status = executionAnalysis.test_status;

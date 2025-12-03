@@ -175,13 +175,26 @@ export class MemoryFileUpdater {
 
         // ✅ FIX: Save query + response + artifacts together in one request
         try {
+            // Collect git metadata (branch, tests, ticket) when available
+            const metadata = await this.getGitMetadata(workspaceFolder);
+            
+            // Generate chunk_id for artifacts if not provided
+            const artifactsWithChunkId = artifacts.map(artifact => {
+                if (!artifact.chunk_id && artifact.identifier && artifact.path) {
+                    // Generate chunk_id from identifier + path hash
+                    const chunkIdSource = `${artifact.identifier}:${artifact.path}`;
+                    artifact.chunk_id = Buffer.from(chunkIdSource).toString('base64').substring(0, 32);
+                }
+                return artifact;
+            });
+            
             const payload: CodeInteractionPayload = {
                 user_id: this.userId,
                 session_id: sessionId,
                 query: userQuery,  // ✅ Pass query
                 response: assistantResponse,  // ✅ Pass response
-                artifacts: artifacts,  // ✅ Pass artifacts
-                metadata: {}
+                artifacts: artifactsWithChunkId,  // ✅ Pass artifacts with chunk_id
+                metadata: metadata  // ✅ Pass git metadata (branch, tests, ticket)
             };
 
             // ✅ FIX: Use recordCodeArtifact for all interactions
@@ -490,6 +503,48 @@ ${content}
         const hash = crypto.createHash('sha256');
         hash.update(workspacePath);
         return hash.digest('hex').substring(0, 16);
+    }
+
+    /**
+     * Collect git metadata (branch/tests/ticket) when available
+     */
+    private async getGitMetadata(workspaceFolder: vscode.WorkspaceFolder): Promise<{ branch?: string; tests?: string; ticket?: string; execution_time?: string }> {
+        const metadata: { branch?: string; tests?: string; ticket?: string; execution_time?: string } = {};
+
+        try {
+            const { exec } = require('child_process');
+            const { promisify } = require('util');
+            const execAsync = promisify(exec);
+            const cwd = workspaceFolder.uri.fsPath;
+
+            // Current branch
+            try {
+                const { stdout: branch } = await execAsync('git rev-parse --abbrev-ref HEAD', { cwd });
+                if (branch && branch.trim()) {
+                    metadata.branch = branch.trim();
+                }
+            } catch (error) {
+                // Git not available or not a git repo
+            }
+
+            // Extract ticket from branch name or commit message
+            // Example: feature/TICKET-123, bugfix/TICKET-456
+            if (metadata.branch) {
+                const ticketMatch = metadata.branch.match(/([A-Z]+-\d+)/i);
+                if (ticketMatch) {
+                    metadata.ticket = ticketMatch[1];
+                }
+            }
+
+            // Test status is determined by CodeExecutionAnalyzer and passed via artifacts
+            // This metadata field can be populated from artifacts if needed
+
+        } catch (error) {
+            // Git metadata collection failed - continue without it
+            console.debug('[Memory File Updater] Git metadata collection failed:', error);
+        }
+
+        return metadata;
     }
 
     /**

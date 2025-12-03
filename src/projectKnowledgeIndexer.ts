@@ -59,8 +59,15 @@ export class ProjectKnowledgeIndexer {
                 this.log(`Indexing "${file.relativePath}" (${sections.length} sections)`);
 
                 for (const section of sections) {
-                    await this.recordSection(sessionId, file.relativePath, section);
-                    await this.sleep(400);
+                    try {
+                        await this.recordSection(sessionId, file.relativePath, section);
+                        // Increased delay to avoid overwhelming the API and prevent timeouts
+                        await this.sleep(600);
+                    } catch (error) {
+                        console.error(`[ProjectKnowledgeIndexer] Failed to index section "${section.title}" from ${file.relativePath}:`, error);
+                        // Continue with next section even if one fails
+                        await this.sleep(200); // Shorter delay on error
+                    }
                 }
             } catch (error) {
                 console.error('[ProjectKnowledgeIndexer] Failed to index file:', file.absolutePath, error);
@@ -124,45 +131,57 @@ export class ProjectKnowledgeIndexer {
     }
 
     private async recordSection(sessionId: string, relativePath: string, section: DocSection): Promise<void> {
-        const summary = this.createSummary(section);
-        const chunk = this.truncate(`${section.body}`.replace(/\s+/g, ' ').trim(), 1600);
-        const tags = this.deriveTags(section);
+        try {
+            const summary = this.createSummary(section);
+            const chunk = this.truncate(`${section.body}`.replace(/\s+/g, ' ').trim(), 1600);
+            const tags = this.deriveTags(section);
 
-        const artifacts: CodeArtifact[] = [
-            {
-                identifier: `${relativePath}#${section.title || 'section'}`,
-                path: relativePath,
-                language: 'markdown',
-                summary,
-                status: 'success',
-                tags,
-                outcome: 'documented'
-            }
-        ];
+            const artifactIdentifier = `${relativePath}#${section.title || 'section'}`;
+            const chunkIdSource = `${artifactIdentifier}:${relativePath}`;
+            const chunkId = Buffer.from(chunkIdSource).toString('base64').substring(0, 32);
 
-        const payload: CodeInteractionPayload = {
-            user_id: this.userId,
-            session_id: sessionId,
-            query: `Documentation ${relativePath}: ${section.title}`,
-            response: `${summary}\n\n${chunk}`,
-            artifacts,
-            metadata: {
-                step: 0,
-                ticket: 'project-knowledge-bootstrap'
-            }
-        };
+            const artifacts: CodeArtifact[] = [
+                {
+                    identifier: artifactIdentifier,
+                    path: relativePath,
+                    language: 'markdown',
+                    summary,
+                    status: 'success',
+                    tags,
+                    outcome: 'documented',
+                    chunk_id: chunkId  // Generate chunk_id for documentation sections
+                }
+            ];
 
-        const result = await this.client.recordCodeArtifact(payload);
-        if (result?.success) {
-            this.log(`Indexed section "${section.title}" from ${relativePath} (entities=${result.memories_created})`);
-            if (this.logger) {
-                this.logger.logOdamSave(payload.query, this.userId, sessionId, 'user_query');
+            const payload: CodeInteractionPayload = {
+                user_id: this.userId,
+                session_id: sessionId,
+                query: `Documentation ${relativePath}: ${section.title}`,
+                response: `${summary}\n\n${chunk}`,
+                artifacts,
+                metadata: {
+                    step: 0,
+                    ticket: 'project-knowledge-bootstrap'
+                }
+            };
+
+            const result = await this.client.recordCodeArtifact(payload);
+            if (result?.success) {
+                this.log(`Indexed section "${section.title}" from ${relativePath} (entities=${result.memories_created})`);
+                if (this.logger) {
+                    this.logger.logOdamSave(payload.query, this.userId, sessionId, 'user_query');
+                }
+            } else {
+                const errorMsg = `Failed to store section "${section.title}" from ${relativePath}`;
+                console.warn(`[ProjectKnowledgeIndexer] ${errorMsg}`);
+                this.outputChannel.appendLine(`[${new Date().toISOString()}] ⚠️ ${errorMsg}`);
+                throw new Error(errorMsg);
             }
-        } else {
-            console.warn('[ProjectKnowledgeIndexer] Failed to store section', {
-                title: section.title,
-                relativePath
-            });
+        } catch (error) {
+            const errorMsg = `Error indexing section "${section.title}" from ${relativePath}: ${error instanceof Error ? error.message : String(error)}`;
+            console.error(`[ProjectKnowledgeIndexer] ${errorMsg}`);
+            this.outputChannel.appendLine(`[${new Date().toISOString()}] ❌ ${errorMsg}`);
+            throw error; // Re-throw to allow caller to handle
         }
     }
 
