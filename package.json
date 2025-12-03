@@ -1,0 +1,138 @@
+{
+  "name": "cursor-odam-extension",
+  "displayName": "ODAM Memory for Cursor",
+  "description": "Long-term memory for Cursor AI assistant through ODAM",
+  "version": "1.0.11",
+  "publisher": "odam-dev",
+  "author": "Andrii Kryvosheiev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aipsyhelp/Cursor_ODAM"
+  },
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "icon": "odam_logo.jpg",
+  "bin": {
+    "cursor-odam-hook": "./out/bin/cursor-odam-hook.js"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "odam.configure",
+        "title": "ODAM: Configure Memory"
+      },
+      {
+        "command": "odam.showMemory",
+        "title": "ODAM: Show Memory"
+      },
+      {
+        "command": "odam.resetMemory",
+        "title": "ODAM: Reset Project Memory"
+      },
+      {
+        "command": "odam.toggle",
+        "title": "ODAM: Toggle Memory"
+      },
+      {
+        "command": "odam.updateMemoryForQuery",
+        "title": "ODAM: Update Memory for Query"
+      },
+      {
+        "command": "odam.debugODAM",
+        "title": "ODAM: Debug ODAM Response (Detailed Analysis)"
+      },
+      {
+        "command": "odam.showMemoryContext",
+        "title": "ODAM: Show Current Memory Context"
+      },
+      {
+        "command": "odam.compareRequestResponse",
+        "title": "ODAM: Compare Request and Response"
+      },
+      {
+        "command": "odam.analyzeMemoryUsage",
+        "title": "ODAM: Analyze Memory Usage in Chat"
+      },
+      {
+        "command": "odam.checkExtension",
+        "title": "ODAM: Automatic Extension Check"
+      },
+      {
+        "command": "odam.recordArtifacts",
+        "title": "ODAM: Record Artifacts from Current File"
+      },
+      {
+        "command": "odam.viewContextLogs",
+        "title": "ODAM: Show Context Logs"
+      },
+      {
+        "command": "odam.viewOdamData",
+        "title": "ODAM: View Data in ODAM"
+      },
+      {
+        "command": "odam.diagnoseOdam",
+        "title": "ODAM: Diagnose Data Transfer to ODAM"
+      }
+    ],
+    "configuration": {
+      "title": "ODAM Memory",
+      "properties": {
+        "odam.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable ODAM long-term memory"
+        },
+        "odam.apiUrl": {
+          "type": "string",
+          "default": "https://api.odam.dev",
+          "description": "ODAM API server URL (Production: https://api.odam.dev)"
+        },
+        "odam.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for ODAM access (stored in secrets)"
+        },
+        "odam.userId": {
+          "type": "string",
+          "default": "",
+          "description": "ODAM user identifier (automatically generated)"
+        },
+        "odam.chatFallbackEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use fallback to /api/v1/chat if Code Memory is unavailable (disabled by default for Cursor)"
+        },
+        "odam.debugChatProbe": {
+          "type": "boolean",
+          "default": false,
+          "description": "Log every Cursor chat related document/notebook event for diagnostics (logs to Developer Tools console)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "axios": "^1.6.0"
+  }
+}
+
