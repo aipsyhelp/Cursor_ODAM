@@ -21,12 +21,17 @@ export class MemoryFileUpdater {
     private logger: ContextLogger | null = null;
     private outputChannel: vscode.OutputChannel;
 
-    constructor(client: OdamClient, userId: string, logger?: ContextLogger) {
+    constructor(client: OdamClient, userId: string, logger?: ContextLogger, workspaceFolder?: vscode.WorkspaceFolder) {
         this.client = client;
         this.userId = userId;
         this.contextEnhancer = new MemoryContextEnhancer();
         this.logger = logger || null;
-        this.outputChannel = vscode.window.createOutputChannel('ODAM Memory File Updater');
+        
+        // ✅ FIX: Create workspace-specific output channel to prevent log mixing between projects
+        const channelName = workspaceFolder 
+            ? `ODAM Memory File Updater (${path.basename(workspaceFolder.uri.fsPath)})`
+            : 'ODAM Memory File Updater';
+        this.outputChannel = vscode.window.createOutputChannel(channelName);
     }
 
     /**

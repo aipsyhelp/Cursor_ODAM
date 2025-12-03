@@ -157,15 +157,20 @@ export class OdamClient {
     private chatFallbackEnabled: boolean;
     private outputChannel: vscode.OutputChannel;
 
-    constructor(apiUrl: string, apiKey: string, options: OdamClientOptions = {}) {
+    constructor(apiUrl: string, apiKey: string, options: OdamClientOptions = {}, workspaceFolder?: vscode.WorkspaceFolder) {
         this.apiUrl = apiUrl.replace(/\/$/, ''); // Remove trailing slash
         this.apiKey = apiKey;
         this.chatFallbackEnabled = options.chatFallbackEnabled ?? false;
-        this.outputChannel = vscode.window.createOutputChannel('ODAM Client');
+        
+        // ✅ FIX: Create workspace-specific output channel to prevent log mixing between projects
+        const channelName = workspaceFolder 
+            ? `ODAM Client (${require('path').basename(workspaceFolder.uri.fsPath)})`
+            : 'ODAM Client';
+        this.outputChannel = vscode.window.createOutputChannel(channelName);
         
         this.client = axios.create({
             baseURL: this.apiUrl,
-            timeout: 30000,
+            timeout: 60000, // Increased timeout
             headers: {
                 'Content-Type': 'application/json',
                 ...(apiKey && { 'Authorization': `Bearer ${apiKey}` })
@@ -391,8 +396,24 @@ export class OdamClient {
             const logMsg1 = `[ODAM Client] 📤 Recording code artifact to ODAM: full_url=${fullUrl}, user_id=${payload.user_id}, session_id=${payload.session_id}, query_length=${payload.query?.length || 0}, response_length=${payload.response?.length || 0}, artifacts_count=${payload.artifacts?.length || 0}, has_api_key=${!!this.apiKey}`;
             console.log(logMsg1);
             this.outputChannel.appendLine(`[${new Date().toISOString()}] ${logMsg1}`);
+            
+            // ✅ FIX: Log full query and response in output channel (not console to avoid clutter)
             this.outputChannel.appendLine(`[${new Date().toISOString()}] Query preview: ${payload.query?.substring(0, 100) || '(empty)'}...`);
             this.outputChannel.appendLine(`[${new Date().toISOString()}] Response preview: ${payload.response?.substring(0, 100) || '(empty)'}...`);
+            
+            // ✅ FIX: Log full query and response in output channel for debugging
+            if (payload.query) {
+                this.outputChannel.appendLine(`[${new Date().toISOString()}] Full query: ${payload.query}`);
+            }
+            if (payload.response) {
+                this.outputChannel.appendLine(`[${new Date().toISOString()}] Full response: ${payload.response}`);
+            }
+            if (payload.artifacts && payload.artifacts.length > 0) {
+                this.outputChannel.appendLine(`[${new Date().toISOString()}] Artifacts: ${JSON.stringify(payload.artifacts, null, 2)}`);
+            }
+            if (payload.metadata) {
+                this.outputChannel.appendLine(`[${new Date().toISOString()}] Metadata: ${JSON.stringify(payload.metadata, null, 2)}`);
+            }
 
             const response = await this.client.post<CodeMemoryRecordResponse>(
                 '/api/v1/code-memory/record',
@@ -425,23 +446,35 @@ export class OdamClient {
     /**
      * Get user memory statistics
      * ✅ FIX: Use /api/v1/code-memory/context to get statistics
+     * @param userId - User identifier (global)
+     * @param sessionId - Optional session/project identifier. If provided, returns project-specific stats. If not, returns global user stats.
      */
     async getMemoryStats(userId: string, sessionId?: string): Promise<MemoryStats | null> {
         try {
-            // ✅ FIX: Use code-memory/context endpoint to get statistics
-            // This endpoint returns stats in codeMemory.stats
+            // ✅ FIX: If sessionId is provided, get project-specific stats. Otherwise, get global stats.
+            // This allows us to show both global and project-specific statistics
             const payload = {
                 user_id: userId,
-                session_id: sessionId,
-                query: 'Get memory statistics',  // Generic query to get all stats
+                ...(sessionId && { session_id: sessionId }),  // ✅ Include session_id if provided for project-specific stats
+                query: sessionId ? 'Get project memory statistics' : 'Get all memory statistics',
                 limit: 1,  // We only need stats, not actual memories
-                include_graph: false,
-                include_entities: false,
-                include_memories: false
+                include_graph: true,  // ✅ Enable to get graph_nodes count
+                include_entities: true,  // ✅ Enable to get entities_total count
+                include_memories: true,  // ✅ Enable to get memories_total count
+                include_search_hits: false  // Not needed for stats
             };
+
+            console.log('[ODAM Client] Fetching memory stats:', { userId, sessionId, payload });
 
             // ✅ FIX: Use MemoryContextResult which wraps CodeMemoryResponse
             const response = await this.client.post<MemoryContextResult>('/api/v1/code-memory/context', payload);
+            
+            console.log('[ODAM Client] Memory stats response:', {
+                hasData: !!response.data,
+                hasCodeMemory: !!response.data?.codeMemory,
+                hasStats: !!response.data?.codeMemory?.stats,
+                stats: response.data?.codeMemory?.stats
+            });
             
             // ✅ FIX: CodeMemoryResponse is inside MemoryContextResult.codeMemory
             if (response.data && response.data.codeMemory) {
@@ -449,7 +482,7 @@ export class OdamClient {
                 if (codeMemory.stats) {
                     const stats = codeMemory.stats;
                     // Convert CodeMemoryStats to MemoryStats format
-                    return {
+                    const result = {
                         user_id: userId,
                         total_memories: stats.memories_total || 0,
                         entities_count: stats.entities_total || 0,
@@ -457,13 +490,16 @@ export class OdamClient {
                         memory_health_score: stats.entities_total > 0 ? 0.8 : 0.0,  // Simple health score
                         last_updated: stats.generated_at || new Date().toISOString()
                     } as MemoryStats;
+                    
+                    console.log('[ODAM Client] Parsed memory stats:', result);
+                    return result;
                 }
             }
             
             // Fallback: if codeMemory is not available, try direct stats
             if (response.data && (response.data as any).stats) {
                 const stats = (response.data as any).stats;
-                return {
+                const result = {
                     user_id: userId,
                     total_memories: stats.memories_total || 0,
                     entities_count: stats.entities_total || 0,
@@ -471,8 +507,12 @@ export class OdamClient {
                     memory_health_score: stats.entities_total > 0 ? 0.8 : 0.0,
                     last_updated: stats.generated_at || new Date().toISOString()
                 } as MemoryStats;
+                
+                console.log('[ODAM Client] Parsed memory stats (fallback):', result);
+                return result;
             }
             
+            console.warn('[ODAM Client] No stats found in response:', response.data);
             return null;
         } catch (error) {
             const axiosError = error as AxiosError;

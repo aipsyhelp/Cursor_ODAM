@@ -43,7 +43,12 @@ export class ContextLogger {
         }
 
         this.logFile = path.join(logDir, `context-${new Date().toISOString().split('T')[0]}.jsonl`);
-        this.outputChannel = vscode.window.createOutputChannel('ODAM Context Logger');
+        
+        // ✅ FIX: Create workspace-specific output channel to prevent log mixing between projects
+        const channelName = workspaceFolder 
+            ? `ODAM Context Logger (${path.basename(workspaceFolder.uri.fsPath)})`
+            : 'ODAM Context Logger';
+        this.outputChannel = vscode.window.createOutputChannel(channelName);
     }
 
     /**

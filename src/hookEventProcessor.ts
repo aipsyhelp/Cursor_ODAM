@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { MemoryFileUpdater } from './memoryFileUpdater';
 import { OdamClient } from './odamClient';
 import { ContextLogger } from './contextLogger';
+import { MemoryStatusBar } from './memoryStatusBar';
 
 export interface HookPromptPayload {
     prompt: string;
@@ -36,6 +37,8 @@ interface HookEventProcessorDeps {
     odamClient: OdamClient;
     logger?: ContextLogger;
     workspaceProvider: () => vscode.WorkspaceFolder | undefined;
+    statusBar?: MemoryStatusBar;
+    userId?: string;
 }
 
 export class HookEventProcessor implements vscode.Disposable {
@@ -46,7 +49,13 @@ export class HookEventProcessor implements vscode.Disposable {
 
     constructor(deps: HookEventProcessorDeps) {
         this.dependencies = deps;
-        this.debugChannel = vscode.window.createOutputChannel('ODAM Hook Events');
+        
+        // ✅ FIX: Create workspace-specific output channel to prevent log mixing between projects
+        const workspaceFolder = deps.workspaceProvider();
+        const channelName = workspaceFolder 
+            ? `ODAM Hook Events (${require('path').basename(workspaceFolder.uri.fsPath)})`
+            : 'ODAM Hook Events';
+        this.debugChannel = vscode.window.createOutputChannel(channelName);
         this.debugChannel.appendLine(`[${new Date().toISOString()}] HookEventProcessor initialized`);
     }
 
@@ -156,6 +165,25 @@ export class HookEventProcessor implements vscode.Disposable {
             this.log('after: updateMemoryAfterResponse completed');
             this.debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] updateMemoryAfterResponse completed successfully`);
             
+            // ✅ FIX: Update status bar tooltip with project-specific statistics after saving
+            if (this.dependencies.statusBar && this.dependencies.userId && this.dependencies.odamClient) {
+                try {
+                    const workspaceFolder = this.dependencies.workspaceProvider();
+                    if (workspaceFolder) {
+                        const sessionId = this.getSessionId(workspaceFolder.uri.fsPath);
+                        // ✅ FIX: Get project-specific stats (with session_id) instead of global stats
+                        const stats = await this.dependencies.odamClient.getMemoryStats(this.dependencies.userId, sessionId);
+                        if (stats) {
+                            this.dependencies.statusBar.updateTooltip(stats);
+                            this.debugChannel.appendLine(`[${new Date().toISOString()}] [HookEventProcessor] Status bar tooltip updated with project stats: memories=${stats.total_memories}, entities=${stats.entities_count}, session_id=${sessionId}`);
+                        }
+                    }
+                } catch (error) {
+                    // Don't fail if tooltip update fails
+                    console.warn('[HookEventProcessor] Failed to update tooltip:', error);
+                }
+            }
+            
             // Verify that data was saved by checking ODAM directly
             // This will help us understand if the save actually happened
             this.log('after: verifying save - check ODAM API logs in output channels: "ODAM Memory File Updater" and "ODAM Client"');
@@ -203,6 +231,16 @@ export class HookEventProcessor implements vscode.Disposable {
     dispose(): void {
         this.debugChannel.appendLine(`[${new Date().toISOString()}] HookEventProcessor disposed`);
         this.debugChannel.dispose();
+    }
+
+    /**
+     * Derive session_id for the workspace
+     */
+    private getSessionId(workspacePath: string): string {
+        const crypto = require('crypto');
+        const hash = crypto.createHash('sha256');
+        hash.update(workspacePath);
+        return hash.digest('hex').substring(0, 16);
     }
 
     private lookupInteraction(payload: HookResponsePayload | HookThoughtPayload): PendingInteraction | undefined {

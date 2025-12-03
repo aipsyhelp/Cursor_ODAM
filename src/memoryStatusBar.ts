@@ -4,6 +4,7 @@
  */
 
 import * as vscode from 'vscode';
+import { MemoryStats } from './odamClient';
 
 export class MemoryStatusBar {
     private statusBarItem: vscode.StatusBarItem;
@@ -33,6 +34,21 @@ export class MemoryStatusBar {
         } else {
             this.statusBarItem.text = '$(brain) ODAM (off)';
             this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+        }
+    }
+
+    /**
+     * Update tooltip with memory statistics
+     */
+    updateTooltip(stats: MemoryStats | null): void {
+        if (stats) {
+            this.statusBarItem.tooltip = `ODAM Memory: Total memories: ${stats.total_memories}\n` +
+                `Entities: ${stats.entities_count}\n` +
+                `Graph nodes: ${stats.graph_nodes || 0}\n` +
+                `Memory health: ${(stats.memory_health_score * 100).toFixed(1)}%\n` +
+                `Source: ODAM Memory for Cursor`;
+        } else {
+            this.statusBarItem.tooltip = 'ODAM Memory – click to toggle\nUnable to fetch statistics';
         }
     }
 

@@ -11,10 +11,15 @@ export class MemoryDebugger {
     private userId: string;
     private outputChannel: vscode.OutputChannel;
 
-    constructor(client: OdamClient, userId: string) {
+    constructor(client: OdamClient, userId: string, workspaceFolder?: vscode.WorkspaceFolder) {
         this.client = client;
         this.userId = userId;
-        this.outputChannel = vscode.window.createOutputChannel('ODAM Memory Debug');
+        
+        // ✅ FIX: Create workspace-specific output channel to prevent log mixing between projects
+        const channelName = workspaceFolder 
+            ? `ODAM Memory Debug (${require('path').basename(workspaceFolder.uri.fsPath)})`
+            : 'ODAM Memory Debug';
+        this.outputChannel = vscode.window.createOutputChannel(channelName);
     }
 
     /**

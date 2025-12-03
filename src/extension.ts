@@ -4,7 +4,7 @@
  */
 
 import * as vscode from 'vscode';
-import { OdamClient, ChatResponse } from './odamClient';
+import { OdamClient, ChatResponse, MemoryStats } from './odamClient';
 import { MemoryContextProvider } from './memoryContextProvider';
 import { MemoryStatusBar } from './memoryStatusBar';
 import { MemoryFileUpdater } from './memoryFileUpdater';
@@ -33,8 +33,14 @@ let projectIndexer: ProjectKnowledgeIndexer | null = null;
  * Activate the extension
  */
 export async function activate(context: vscode.ExtensionContext) {
-    // Create activation output channel
-    const outputChannel = vscode.window.createOutputChannel('ODAM Extension');
+    // Get workspace folder for workspace-specific output channels
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    
+    // Create activation output channel (workspace-specific)
+    const channelName = workspaceFolder 
+        ? `ODAM Extension (${require('path').basename(workspaceFolder.uri.fsPath)})`
+        : 'ODAM Extension';
+    const outputChannel = vscode.window.createOutputChannel(channelName);
     outputChannel.show(true); // auto-show for visibility
     outputChannel.appendLine('═══════════════════════════════════════════════════════════');
     outputChannel.appendLine('ODAM Memory Extension is activating...');
@@ -63,10 +69,10 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
     }
 
-    // Initialize ODAM client
+    // Initialize ODAM client with workspace folder for workspace-specific output channels
     odamClient = new OdamClient(apiUrl, apiKey, {
         chatFallbackEnabled
-    });
+    }, workspaceFolder);
 
     // Ensure ODAM API is reachable
     const isHealthy = await odamClient.healthCheck();
@@ -86,7 +92,6 @@ export async function activate(context: vscode.ExtensionContext) {
     }
 
     // Initialize context logger
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (workspaceFolder) {
         contextLogger = new ContextLogger(workspaceFolder);
     }
@@ -95,14 +100,16 @@ export async function activate(context: vscode.ExtensionContext) {
     codeArtifactTracker = new CodeArtifactTracker(odamClient, userId, context, contextLogger || undefined);
     contextProvider = new MemoryContextProvider(odamClient, userId, codeArtifactTracker);
     statusBar = new MemoryStatusBar(context);
-    memoryFileUpdater = new MemoryFileUpdater(odamClient, userId, contextLogger || undefined);
-    memoryDebugger = new MemoryDebugger(odamClient, userId);
+    memoryFileUpdater = new MemoryFileUpdater(odamClient, userId, contextLogger || undefined, workspaceFolder);
+    memoryDebugger = new MemoryDebugger(odamClient, userId, workspaceFolder);
     codeStyleTracker = new CodeStyleTracker(odamClient, userId);
     hookEventProcessor = new HookEventProcessor({
         memoryFileUpdater,
         odamClient,
         logger: contextLogger || undefined,
-        workspaceProvider: () => vscode.workspace.workspaceFolders?.[0]
+        workspaceProvider: () => vscode.workspace.workspaceFolders?.[0],
+        statusBar: statusBar,
+        userId: userId
     });
     const hookEnv = setupHookEnvironment(context.extensionPath);
     hookEventServer = new HookEventServer(hookEventProcessor, context);
@@ -190,23 +197,44 @@ function registerCommands(
     const showMemoryCommand = vscode.commands.registerCommand('odam.showMemory', async () => {
         try {
             const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-            const sessionId = workspaceFolder ? getSessionId(workspaceFolder.uri.fsPath) : undefined;
+            let stats: MemoryStats | null = null;
+            let statsType = 'global';
             
-            // ✅ FIX: Pass sessionId to getMemoryStats
-            const stats = await client.getMemoryStats(userId, sessionId);
+            if (workspaceFolder) {
+                // ✅ FIX: Get project-specific statistics (with session_id) for current project
+                const sessionId = getSessionId(workspaceFolder.uri.fsPath);
+                stats = await client.getMemoryStats(userId, sessionId);
+                statsType = 'project';
+            } else {
+                // Fallback to global stats if no workspace
+                stats = await client.getMemoryStats(userId);
+            }
+            
             if (stats) {
-                const message = `ODAM Memory:\n` +
+                const projectInfo = workspaceFolder ? `\nProject: ${require('path').basename(workspaceFolder.uri.fsPath)}` : '';
+                const message = `ODAM Memory (${statsType}):${projectInfo}\n` +
                     `Total memories: ${stats.total_memories}\n` +
                     `Entities: ${stats.entities_count}\n` +
                     `Graph nodes: ${stats.graph_nodes || 0}\n` +
                     `Memory health: ${(stats.memory_health_score * 100).toFixed(1)}%`;
                 vscode.window.showInformationMessage(message);
+                
+                // ✅ FIX: Update status bar tooltip with project-specific statistics
+                if (statusBar) {
+                    statusBar.updateTooltip(stats);
+                }
             } else {
                 vscode.window.showWarningMessage('Unable to fetch memory stats. Check ODAM API connectivity.');
+                if (statusBar) {
+                    statusBar.updateTooltip(null);
+                }
             }
         } catch (error) {
             console.error('[Extension] Error getting memory stats:', error);
             vscode.window.showErrorMessage(`Failed to fetch stats: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            if (statusBar) {
+                statusBar.updateTooltip(null);
+            }
         }
     });
 
@@ -846,5 +874,23 @@ function getSessionId(workspacePath: string): string {
     const hash = crypto.createHash('sha256');
     hash.update(workspacePath);
     return hash.digest('hex').substring(0, 16);
+}
+
+/**
+ * Get workspace-specific output channel name
+ * This ensures each workspace has its own output channels, preventing log mixing
+ */
+function getWorkspaceOutputChannelName(baseName: string, workspaceFolder?: vscode.WorkspaceFolder): string {
+    if (!workspaceFolder) {
+        workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    }
+    
+    if (workspaceFolder) {
+        const path = require('path');
+        const workspaceName = path.basename(workspaceFolder.uri.fsPath);
+        return `${baseName} (${workspaceName})`;
+    }
+    
+    return baseName;
 }
 
