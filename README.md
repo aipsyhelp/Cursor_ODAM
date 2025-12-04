@@ -239,6 +239,10 @@ ODAM stores multiple types of memory:
 6. **Privacy**: User data is encrypted and isolated
 7. **Intelligence**: Learns from past interactions to improve future responses
 
+## Documentation
+
+- **[Changes and Architecture](docs/CHANGES_AND_ARCHITECTURE.md)** - Detailed documentation of all changes, project isolation architecture, memory statistics fixes, and technical implementation details
+
 ## Development
 
 ### Prerequisites
